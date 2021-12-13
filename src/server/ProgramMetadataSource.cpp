@@ -25,6 +25,10 @@ ProgramMetadataSource::ProgramMetadataSource(
 }
 
 ProgramMetadataSource::~ProgramMetadataSource() {
+  if (context_->tuner()) {
+    context_->tuner()->removeObserver(this);
+  }
+
   --referenceCount;
 
   if (referenceCount == 0) {
