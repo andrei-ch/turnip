@@ -45,18 +45,20 @@ class DynamicRTSPServer : public RTSPServer {
   virtual ~DynamicRTSPServer();
 
  protected:
-  virtual void lookupServerMediaSession(char const* streamName,
-					lookupServerMediaSessionCompletionFunc* completionFunc,
-					void* completionClientData,
-					Boolean isFirstLookupInSession) override;
+  virtual void lookupServerMediaSession(
+      char const* streamName,
+      lookupServerMediaSessionCompletionFunc* completionFunc,
+      void* completionClientData,
+      Boolean isFirstLookupInSession) override;
   virtual GenericMediaServer::ClientConnection* createNewClientConnection(
       int clientSocket,
       struct sockaddr_storage const& clientAddr) override;
-  virtual GenericMediaServer::ClientSession* createNewClientSession(u_int32_t sessionId) override;
+  virtual GenericMediaServer::ClientSession* createNewClientSession(
+      u_int32_t sessionId) override;
 
-private:
+ private:
   struct SessionLookupData {
-    DynamicRTSPServer *pthis;
+    DynamicRTSPServer* pthis;
     std::string streamName;
     Boolean isFirstLookupInSession;
     lookupServerMediaSessionCompletionFunc* completionFunc;
@@ -67,13 +69,17 @@ private:
     std::string fullRequest;
   };
 
-private:
+ private:
   ServerMediaSession* setupMediaSession(
-    char const* streamName,
-    ServerMediaSession* sms,
-    Boolean isFirstLookupInSession);
-  static void sessionLookupCompletion(void* opaque, ServerMediaSession* session);
-  static void commandLookupCompletion(void* opaque, ServerMediaSession* session);
+      char const* streamName,
+      ServerMediaSession* sms,
+      Boolean isFirstLookupInSession);
+  static void sessionLookupCompletion(
+      void* opaque,
+      ServerMediaSession* session);
+  static void commandLookupCompletion(
+      void* opaque,
+      ServerMediaSession* session);
 
  public:
   class CustomRTSPClientConnection : public RTSPServer::RTSPClientConnection {
@@ -96,9 +102,7 @@ private:
 
    protected:
     CustomRTSPClientSession(RTSPServer& ourServer, u_int32_t sessionId)
-        : RTSPServer::RTSPClientSession(
-              ourServer,
-              sessionId) {}
+        : RTSPServer::RTSPClientSession(ourServer, sessionId) {}
     virtual void handleCmd_SET_PARAMETER(
         RTSPServer::RTSPClientConnection* ourClientConnection,
         ServerMediaSubsession* subsession,
@@ -121,7 +125,13 @@ DynamicRTSPServer* DynamicRTSPServer::createNew(
     return NULL;
 
   return new DynamicRTSPServer(
-      env, ourSocket4, ourSocket6, ourPort, authDatabase, device, reclamationTestSeconds);
+      env,
+      ourSocket4,
+      ourSocket6,
+      ourPort,
+      authDatabase,
+      device,
+      reclamationTestSeconds);
 }
 
 DynamicRTSPServer::DynamicRTSPServer(
@@ -143,26 +153,30 @@ DynamicRTSPServer::DynamicRTSPServer(
 
 DynamicRTSPServer::~DynamicRTSPServer() {}
 
-void DynamicRTSPServer::sessionLookupCompletion(void* opaque,
-						    ServerMediaSession* session) {
-  SessionLookupData *data = static_cast<SessionLookupData*>(opaque);
-  session = data->pthis->setupMediaSession(data->streamName.c_str(), session, data->isFirstLookupInSession);
+void DynamicRTSPServer::sessionLookupCompletion(
+    void* opaque,
+    ServerMediaSession* session) {
+  SessionLookupData* data = static_cast<SessionLookupData*>(opaque);
+  session = data->pthis->setupMediaSession(
+      data->streamName.c_str(), session, data->isFirstLookupInSession);
   (*data->completionFunc)(data->completionClientData, session);
   delete data;
 }
 
-void DynamicRTSPServer::lookupServerMediaSession(char const* streamName,
-					lookupServerMediaSessionCompletionFunc* completionFunc,
-					void* opaque,
-					Boolean isFirstLookupInSession /*= True*/) {
-    SessionLookupData *completionData = new SessionLookupData {
+void DynamicRTSPServer::lookupServerMediaSession(
+    char const* streamName,
+    lookupServerMediaSessionCompletionFunc* completionFunc,
+    void* opaque,
+    Boolean isFirstLookupInSession /*= True*/) {
+  SessionLookupData* completionData = new SessionLookupData{
       .pthis = this,
       .streamName = streamName,
       .isFirstLookupInSession = isFirstLookupInSession,
       .completionFunc = completionFunc,
       .completionClientData = opaque,
-    };
-    RTSPServer::lookupServerMediaSession(streamName, &DynamicRTSPServer::sessionLookupCompletion, completionData);
+  };
+  RTSPServer::lookupServerMediaSession(
+      streamName, &DynamicRTSPServer::sessionLookupCompletion, completionData);
 }
 
 ServerMediaSession* DynamicRTSPServer::setupMediaSession(
@@ -222,9 +236,7 @@ GenericMediaServer::ClientSession* DynamicRTSPServer::createNewClientSession(
 
 void DynamicRTSPServer::CustomRTSPClientConnection::handleCmd_SET_PARAMETER(
     char const* fullRequestStr) {
-  RTSPServer::
-      RTSPClientConnection::handleCmd_SET_PARAMETER(
-          fullRequestStr);
+  RTSPServer::RTSPClientConnection::handleCmd_SET_PARAMETER(fullRequestStr);
 }
 
 static std::vector<std::string> parseRTSPHeaders(char const* fullRequestStr) {
@@ -246,8 +258,10 @@ static std::vector<std::string> parseRTSPHeaders(char const* fullRequestStr) {
   return out;
 }
 
-void DynamicRTSPServer::commandLookupCompletion(void* opaque, ServerMediaSession* session) {
-  CommandLookupData *data = static_cast<CommandLookupData*>(opaque);
+void DynamicRTSPServer::commandLookupCompletion(
+    void* opaque,
+    ServerMediaSession* session) {
+  CommandLookupData* data = static_cast<CommandLookupData*>(opaque);
   ServerMediaSubsessionIterator iter(*session);
   ServerMediaSubsession* subsession = nullptr;
   while ((subsession = iter.next())) {
@@ -288,10 +302,14 @@ void DynamicRTSPServer::CustomRTSPClientSession::handleCmd_SET_PARAMETER(
           sizeof cseq,
           sessionId,
           sizeof sessionId,
-          contentLength, urlIsRTSPS)) {
-    CommandLookupData *data = new CommandLookupData { .fullRequest = fullRequestStr, };
-    fOurServer.lookupServerMediaSession(urlSuffix, &DynamicRTSPServer::commandLookupCompletion, data, False);
-   }
+          contentLength,
+          urlIsRTSPS)) {
+    CommandLookupData* data = new CommandLookupData{
+        .fullRequest = fullRequestStr,
+    };
+    fOurServer.lookupServerMediaSession(
+        urlSuffix, &DynamicRTSPServer::commandLookupCompletion, data, False);
+  }
   RTSPServer::RTSPClientSession::handleCmd_SET_PARAMETER(
       ourClientConnection, subsession_, fullRequestStr);
 }
