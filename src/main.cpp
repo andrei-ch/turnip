@@ -5,7 +5,7 @@
 //  Created by Andrei Chtcherbatchenko on 12/29/20.
 //
 
-#include "server/RTSPServer.hpp"
+#include "server/Server.hpp"
 
 #include <sdrplay/api.hpp>
 #include <sdrplay/device.hpp>
@@ -43,7 +43,7 @@ int main(int argc, const char* argv[]) {
   device->select();
   sdrplay::api::unlock();
 
-  Tuner::RTSPServer server(device.get());
+  Tuner::Server server(device.get());
   server.startRunning();
 
   // TODO exit immediately if port 544 is already in use -> important for

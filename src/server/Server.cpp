@@ -1,11 +1,11 @@
 //
-//  RTSPServer.cpp
+//  Server.cpp
 //  Turnip
 //
 //  Created by Andrei Chtcherbatchenko on 1/2/21.
 //
 
-#include "RTSPServer.hpp"
+#include "Server.hpp"
 
 #include "ModemContext.hpp"
 #include "OnDemandMetadataSubsession.hpp"
@@ -13,6 +13,7 @@
 
 #include <boost/algorithm/string.hpp>
 #include <BasicUsageEnvironment/BasicUsageEnvironment.hh>
+#include <groupsock/NetAddress.hh>
 #include <liveMedia/RTSPCommon.hh>
 #include <liveMedia/liveMedia.hh>
 
@@ -22,7 +23,7 @@ namespace {
 
 #define MEDIA_SERVER_VERSION_STRING "0.99"
 
-class DynamicRTSPServer : public RTSPServerSupportingHTTPStreaming {
+class DynamicRTSPServer : public RTSPServer {
  public:
   static DynamicRTSPServer* createNew(
       UsageEnvironment& env,
@@ -34,7 +35,8 @@ class DynamicRTSPServer : public RTSPServerSupportingHTTPStreaming {
  protected:
   DynamicRTSPServer(
       UsageEnvironment& env,
-      int ourSocket,
+      int ourSocket4,
+      int ourSocket6,
       Port ourPort,
       UserAuthenticationDatabase* authDatabase,
       SDRDevice* device,
@@ -42,41 +44,62 @@ class DynamicRTSPServer : public RTSPServerSupportingHTTPStreaming {
   // called only by createNew();
   virtual ~DynamicRTSPServer();
 
- protected: // redefined virtual functions
-  virtual ServerMediaSession* lookupServerMediaSession(
-      char const* streamName,
-      Boolean isFirstLookupInSession);
-  virtual ClientConnection* createNewClientConnection(
+ protected:
+  virtual void lookupServerMediaSession(char const* streamName,
+					lookupServerMediaSessionCompletionFunc* completionFunc,
+					void* completionClientData,
+					Boolean isFirstLookupInSession) override;
+  virtual GenericMediaServer::ClientConnection* createNewClientConnection(
       int clientSocket,
-      struct sockaddr_in clientAddr);
-  virtual ClientSession* createNewClientSession(u_int32_t sessionId);
+      struct sockaddr_storage const& clientAddr) override;
+  virtual GenericMediaServer::ClientSession* createNewClientSession(u_int32_t sessionId) override;
 
-  class CustomRTSPClientConnection
-      : public RTSPClientConnectionSupportingHTTPStreaming {
+private:
+  struct CompletionData {
+    DynamicRTSPServer *pthis;
+    void* completionClientData;
+    lookupServerMediaSessionCompletionFunc* completionFunc;
+    std::string streamName;
+    Boolean isFirstLookupInSession;
+  };
+  struct CmdLookupData {
+    std::string fullRequest;
+  };
+
+private:
+  ServerMediaSession* setupMediaSession(
+    char const* streamName,
+    ServerMediaSession* sms,
+    Boolean isFirstLookupInSession);
+  static void myLookupCompletionFunc(void* opaque, ServerMediaSession* session);
+  static void myCmdLookupCompletionFunc(void* opaque, ServerMediaSession* session);
+
+ public:
+  class CustomRTSPClientConnection : public RTSPServer::RTSPClientConnection {
     friend class DynamicRTSPServer;
 
    protected:
     CustomRTSPClientConnection(
         RTSPServer& ourServer,
         int clientSocket,
-        struct sockaddr_in clientAddr)
-        : RTSPClientConnectionSupportingHTTPStreaming(
+        struct sockaddr_storage const& clientAddr)
+        : RTSPServer::RTSPClientConnection(
               ourServer,
               clientSocket,
               clientAddr) {}
-    virtual void handleCmd_SET_PARAMETER(char const* fullRequestStr);
+    virtual void handleCmd_SET_PARAMETER(char const* fullRequestStr) override;
   };
 
-  class CustomRTSPClientSession : public RTSPClientSession {
+  class CustomRTSPClientSession : public RTSPServer::RTSPClientSession {
     friend class DynamicRTSPServer;
 
    protected:
     CustomRTSPClientSession(RTSPServer& ourServer, u_int32_t sessionId)
-        : RTSPServerSupportingHTTPStreaming::RTSPClientSession(
+        : RTSPServer::RTSPClientSession(
               ourServer,
               sessionId) {}
     virtual void handleCmd_SET_PARAMETER(
-        RTSPClientConnection* ourClientConnection,
+        RTSPServer::RTSPClientConnection* ourClientConnection,
         ServerMediaSubsession* subsession,
         char const* fullRequestStr);
   };
@@ -91,24 +114,27 @@ DynamicRTSPServer* DynamicRTSPServer::createNew(
     UserAuthenticationDatabase* authDatabase,
     SDRDevice* device,
     unsigned reclamationTestSeconds) {
-  int ourSocket = setUpOurSocket(env, ourPort);
-  if (ourSocket == -1)
+  int ourSocket4 = setUpOurSocket(env, ourPort, AF_INET);
+  int ourSocket6 = setUpOurSocket(env, ourPort, AF_INET6);
+  if (ourSocket4 < 0 && ourSocket6 < 0)
     return NULL;
 
   return new DynamicRTSPServer(
-      env, ourSocket, ourPort, authDatabase, device, reclamationTestSeconds);
+      env, ourSocket4, ourSocket6, ourPort, authDatabase, device, reclamationTestSeconds);
 }
 
 DynamicRTSPServer::DynamicRTSPServer(
     UsageEnvironment& env,
-    int ourSocket,
+    int ourSocket4,
+    int ourSocket6,
     Port ourPort,
     UserAuthenticationDatabase* authDatabase,
     SDRDevice* device,
     unsigned reclamationTestSeconds)
-    : RTSPServerSupportingHTTPStreaming(
+    : RTSPServer(
           env,
-          ourSocket,
+          ourSocket4,
+          ourSocket6,
           ourPort,
           authDatabase,
           reclamationTestSeconds),
@@ -116,10 +142,27 @@ DynamicRTSPServer::DynamicRTSPServer(
 
 DynamicRTSPServer::~DynamicRTSPServer() {}
 
-ServerMediaSession* DynamicRTSPServer::lookupServerMediaSession(
+void DynamicRTSPServer::myLookupCompletionFunc(void* clientData,
+						    ServerMediaSession* sessionLookedUp) {
+  CompletionData *completionData = (CompletionData*)clientData;
+  sessionLookedUp = completionData->pthis->setupMediaSession(completionData->streamName.c_str(), sessionLookedUp, completionData->isFirstLookupInSession);
+  (*completionData->completionFunc)(completionData->completionClientData, sessionLookedUp);
+  delete completionData;
+}
+
+void DynamicRTSPServer::lookupServerMediaSession(char const* streamName,
+					lookupServerMediaSessionCompletionFunc* completionFunc,
+					void* completionClientData,
+					Boolean isFirstLookupInSession /*= True*/) {
+    CompletionData *completionData = new CompletionData { .pthis = this, .completionClientData = completionClientData,
+                  .completionFunc = completionFunc, .streamName = streamName, .isFirstLookupInSession = isFirstLookupInSession };
+    RTSPServer::lookupServerMediaSession(streamName, myLookupCompletionFunc, completionData);
+}
+
+ServerMediaSession* DynamicRTSPServer::setupMediaSession(
     char const* streamName,
+    ServerMediaSession* sms,
     Boolean isFirstLookupInSession) {
-  ServerMediaSession* sms = RTSPServer::lookupServerMediaSession(streamName);
   std::shared_ptr<ModemContext> modemContext;
 
   try {
@@ -162,7 +205,7 @@ ServerMediaSession* DynamicRTSPServer::lookupServerMediaSession(
 GenericMediaServer::ClientConnection*
 DynamicRTSPServer::createNewClientConnection(
     int clientSocket,
-    struct sockaddr_in clientAddr) {
+    struct sockaddr_storage const& clientAddr) {
   return new CustomRTSPClientConnection(*this, clientSocket, clientAddr);
 }
 
@@ -173,12 +216,11 @@ GenericMediaServer::ClientSession* DynamicRTSPServer::createNewClientSession(
 
 void DynamicRTSPServer::CustomRTSPClientConnection::handleCmd_SET_PARAMETER(
     char const* fullRequestStr) {
-  RTSPServerSupportingHTTPStreaming::
-      RTSPClientConnectionSupportingHTTPStreaming::handleCmd_SET_PARAMETER(
+  RTSPServer::
+      RTSPClientConnection::handleCmd_SET_PARAMETER(
           fullRequestStr);
 }
 
-namespace {
 static std::vector<std::string> parseRTSPHeaders(char const* fullRequestStr) {
   std::vector<std::string> out;
   std::istringstream resp(fullRequestStr);
@@ -197,7 +239,24 @@ static std::vector<std::string> parseRTSPHeaders(char const* fullRequestStr) {
   }
   return out;
 }
-} // namespace
+
+void DynamicRTSPServer::myCmdLookupCompletionFunc(void* opaque, ServerMediaSession* session) {
+  CmdLookupData *data = (CmdLookupData*)opaque;
+    ServerMediaSubsessionIterator iter(*session);
+    ServerMediaSubsession* subsession = nullptr;
+    while ((subsession = iter.next())) {
+      OnDemandModemSubsession* modemSubsession =
+          dynamic_cast<OnDemandModemSubsession*>(subsession);
+      if (modemSubsession) {
+        const auto paramUpdates = parseRTSPHeaders(data->fullRequest.c_str());
+        for (const auto& paramUpdate : paramUpdates) {
+          modemSubsession->context()->queueParamUpdate(paramUpdate);
+        }
+        break;
+      }
+    }
+  delete data;
+}
 
 void DynamicRTSPServer::CustomRTSPClientSession::handleCmd_SET_PARAMETER(
     RTSPClientConnection* ourClientConnection,
@@ -209,6 +268,7 @@ void DynamicRTSPServer::CustomRTSPClientSession::handleCmd_SET_PARAMETER(
   char cseq[RTSP_PARAM_STRING_MAX];
   char sessionId[RTSP_PARAM_STRING_MAX];
   unsigned contentLength;
+  Boolean urlIsRTSPS = False;
   if (parseRTSPRequestString(
           fullRequestStr,
           strlen(fullRequestStr),
@@ -222,31 +282,17 @@ void DynamicRTSPServer::CustomRTSPClientSession::handleCmd_SET_PARAMETER(
           sizeof cseq,
           sessionId,
           sizeof sessionId,
-          contentLength)) {
-    ServerMediaSession* session =
-        fOurServer.lookupServerMediaSession(urlSuffix, False);
-    ServerMediaSubsessionIterator iter(*session);
-    ServerMediaSubsession* subsession = nullptr;
-    while ((subsession = iter.next())) {
-      OnDemandModemSubsession* modemSubsession =
-          dynamic_cast<OnDemandModemSubsession*>(subsession);
-      if (modemSubsession) {
-        const auto paramUpdates = parseRTSPHeaders(fullRequestStr);
-        for (const auto& paramUpdate : paramUpdates) {
-          modemSubsession->context()->queueParamUpdate(paramUpdate);
-        }
-        break;
-      }
-    }
-  }
-
-  RTSPServerSupportingHTTPStreaming::RTSPClientSession::handleCmd_SET_PARAMETER(
+          contentLength, urlIsRTSPS)) {
+    CmdLookupData *data = new CmdLookupData { .fullRequest = fullRequestStr };
+    fOurServer.lookupServerMediaSession(urlSuffix, myCmdLookupCompletionFunc, data, False);
+   }
+  RTSPServer::RTSPClientSession::handleCmd_SET_PARAMETER(
       ourClientConnection, subsession_, fullRequestStr);
 }
 
 } // namespace
 
-void RTSPServer::setupServer() {
+void Server::setupServer() {
   TaskScheduler* scheduler = BasicTaskScheduler::createNew();
   env_ = BasicUsageEnvironment::createNew(*scheduler);
 
@@ -258,17 +304,17 @@ void RTSPServer::setupServer() {
   // TODO bubble error to the app
 }
 
-void RTSPServer::runner() {
+void Server::runner() {
   setupServer();
   env_->taskScheduler().doEventLoop(&stopping_);
 }
 
-void RTSPServer::startRunning() {
+void Server::startRunning() {
   stopping_ = 0;
-  thread_ = std::thread(&RTSPServer::runner, this);
+  thread_ = std::thread(&Server::runner, this);
 }
 
-void RTSPServer::stopRunning() {
+void Server::stopRunning() {
   stopping_ = 1;
   thread_.join();
 }

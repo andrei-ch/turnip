@@ -1,5 +1,5 @@
 //
-//  RTSPServer.hpp
+//  Server.hpp
 //  Turnip
 //
 //  Created by Andrei Chtcherbatchenko on 1/2/21.
@@ -20,9 +20,9 @@ namespace Tuner {
 
 using SDRDevice = sdrplay::device;
 
-class RTSPServer {
+class Server {
  public:
-  RTSPServer(SDRDevice* device) : device_(device) {}
+  Server(SDRDevice* device) : device_(device) {}
 
   void startRunning();
   void stopRunning();

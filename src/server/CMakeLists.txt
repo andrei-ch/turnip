@@ -12,8 +12,8 @@ add_library(server
 		OnDemandModemSubsession.hpp
 		ProgramMetadataSource.cpp
 		ProgramMetadataSource.hpp
-		RTSPServer.cpp
-		RTSPServer.hpp
+		Server.cpp
+		Server.hpp
 		)
 
 target_compile_definitions(server
@@ -21,16 +21,20 @@ target_compile_definitions(server
 	)
 
 if(NOT LIVEMEDIA_PRIVATE_INCLUDE_DIR)
-	if(APPLE)
-		set(LIVEMEDIA_PRIVATE_INCLUDE_DIR "/usr/local/include")
-	else()
-		set(LIVEMEDIA_PRIVATE_INCLUDE_DIR "/usr/include")
-	endif()
+	set(LIVEMEDIA_PRIVATE_INCLUDE_DIR "/usr/local/include")
+endif()
+
+if(NOT LIVEMEDIA_PRIVATE_LIB_DIR)
+	set(LIVEMEDIA_PRIVATE_LIB_DIR "/usr/local/lib")
 endif()
 
 target_include_directories(server
 		PRIVATE ${LIVEMEDIA_PRIVATE_INCLUDE_DIR}/UsageEnvironment
 		PRIVATE ${LIVEMEDIA_PRIVATE_INCLUDE_DIR}/groupsock
+		)
+
+target_link_directories(server
+		PUBLIC ${LIVEMEDIA_PRIVATE_LIB_DIR}
 		)
 
 add_dependencies(server
@@ -39,8 +43,8 @@ add_dependencies(server
 
 target_link_libraries(server
 		tuners
-		groupsock
 		liveMedia
+		groupsock
 		BasicUsageEnvironment
 		UsageEnvironment
 		)
