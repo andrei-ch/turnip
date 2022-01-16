@@ -31,7 +31,7 @@ using SDRDevice = sdrplay::device;
 
 struct FMTunerAdvancedParams {
   double deviceSamplingFreq = 2000000.0;
-  unsigned int audioSamplingFreq = 48000;
+  unsigned int audioSamplingFreq = 44100;
   unsigned int outputBitrateKbps = 128;
 };
 
